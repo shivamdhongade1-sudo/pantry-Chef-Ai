@@ -2,10 +2,13 @@
 PantryChef AI
 -------------
 A Streamlit application that suggests a recipe based on ingredients you
-already have at home, using a local LLM served via Ollama.
+already have at home, using Groq's hosted LLM API.
 
-Required (same directory as this script):
-    - ollama running locally, with a model already pulled (e.g. `ollama pull llama3.1`)
+Required:
+    - pip install groq
+    - A Groq API key, set as the GROQ_API_KEY environment variable or in
+      .streamlit/secrets.toml as GROQ_API_KEY = "..."
+      (get one at https://console.groq.com/keys)
 
 Optional:
     - sample_recipes.csv : a CSV with 'name' and 'ingredients' columns, used to
@@ -15,22 +18,23 @@ Optional:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 try:
-    import ollama
-    
+    from groq import Groq
 except ImportError:
-    ollama = None
+    Groq = None
 
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
 DATASET_PATH = Path("sample_recipes.csv")
-DEFAULT_MODEL = "llama3.1:latest"
+# See https://console.groq.com/docs/models for the current list of models.
+DEFAULT_MODEL = "llama-3.1-8b-instant"
 DEFAULT_STAPLES = ["salt", "pepper", "olive oil"]
 NUM_GROUNDING_RECIPES = 3
 
@@ -40,7 +44,23 @@ st.set_page_config(
     layout="centered",
 )
 
-st.write("Ollama model:", DEFAULT_MODEL)
+
+def get_api_key() -> str | None:
+    """Look up the Groq API key from Streamlit secrets or the environment."""
+    try:
+        if "GROQ_API_KEY" in st.secrets:
+            return st.secrets["GROQ_API_KEY"]
+    except Exception:  # noqa: BLE001 - st.secrets raises if no secrets.toml exists
+        pass
+    return os.environ.get("GROQ_API_KEY")
+
+
+@st.cache_resource(show_spinner=False)
+def get_client(api_key: str) -> "Groq":
+    """Create (and cache) a Groq client for the given API key."""
+    return Groq(api_key=api_key)
+
+
 # --------------------------------------------------------------------------- #
 # Data loading (cached so files are read only once per session)
 # --------------------------------------------------------------------------- #
@@ -114,12 +134,21 @@ Suggest ONE recipe using as many available ingredients as possible. Respond in t
 """
 
 
-def generate_recipe(prompt: str, model: str) -> str:
-    """Send the prompt to Ollama and return the model's response text."""
-    if ollama is None:
-        raise RuntimeError("The 'ollama' package isn't installed. Run: pip install ollama")
-    response = ollama.chat(model=model, messages=[{"role": "user", "content": prompt}])
-    return response['message']['content']
+def generate_recipe(prompt: str, model: str, api_key: str) -> str:
+    """Send the prompt to Groq and return the model's response text."""
+    if Groq is None:
+        raise RuntimeError("The 'groq' package isn't installed. Run: pip install groq")
+    if not api_key:
+        raise RuntimeError(
+            "No Groq API key found. Set GROQ_API_KEY as an environment variable "
+            "or in .streamlit/secrets.toml."
+        )
+    client = get_client(api_key)
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.choices[0].message.content
 
 
 # --------------------------------------------------------------------------- #
@@ -134,6 +163,14 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001 - surface any load error to the user
         st.error(f"Failed to load dataset: {exc}")
         st.stop()
+
+    api_key = get_api_key()
+    if not api_key:
+        st.warning(
+            "No Groq API key found. Set the GROQ_API_KEY environment variable, "
+            "or add GROQ_API_KEY to .streamlit/secrets.toml, then restart the app.\n\n"
+            "Get a free key at https://console.groq.com/keys"
+        )
 
     raw_ingredients = st.text_input(
         "Ingredients you have (comma-separated)",
@@ -165,7 +202,7 @@ def main() -> None:
 
         try:
             with st.spinner("PantryChef is thinking..."):
-                recipe = generate_recipe(prompt, DEFAULT_MODEL)
+                recipe = generate_recipe(prompt, DEFAULT_MODEL, api_key)
         except Exception as exc:  # noqa: BLE001 - surface any generation error to the user
             st.error(f"Failed to generate a recipe: {exc}")
             return
