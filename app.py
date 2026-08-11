@@ -20,6 +20,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+st.write("Ollama model:", DEFAULT_MODEL)
 try:
     import ollama
 
