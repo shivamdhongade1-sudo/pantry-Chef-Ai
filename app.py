@@ -29,7 +29,7 @@ except ImportError:
 # Configuration
 # --------------------------------------------------------------------------- #
 DATASET_PATH = Path("sample_recipes.csv")
-DEFAULT_MODEL = "llama3.1"
+DEFAULT_MODEL = "llama3.1:latest"
 DEFAULT_STAPLES = ["salt", "pepper", "olive oil"]
 NUM_GROUNDING_RECIPES = 3
 
