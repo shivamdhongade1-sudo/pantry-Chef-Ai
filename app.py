@@ -22,6 +22,8 @@ import streamlit as st
 
 try:
     import ollama
+
+ollama.Client(host="http://127.0.0.1:11434")
 except ImportError:
     ollama = None
 
