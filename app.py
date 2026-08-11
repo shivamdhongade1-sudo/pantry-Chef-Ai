@@ -20,7 +20,6 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-st.write("Ollama model:", DEFAULT_MODEL)
 try:
     import ollama
     
@@ -41,7 +40,7 @@ st.set_page_config(
     layout="centered",
 )
 
-
+st.write("Ollama model:", DEFAULT_MODEL)
 # --------------------------------------------------------------------------- #
 # Data loading (cached so files are read only once per session)
 # --------------------------------------------------------------------------- #
