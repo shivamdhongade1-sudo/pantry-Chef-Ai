@@ -23,8 +23,7 @@ import streamlit as st
 st.write("Ollama model:", DEFAULT_MODEL)
 try:
     import ollama
-
-ollama.Client(host="http://127.0.0.1:11434")
+    
 except ImportError:
     ollama = None
 
