@@ -16,6 +16,7 @@ Optional:
 from __future__ import annotations
 
 from pathlib import Path
+import os
 
 import pandas as pd
 import streamlit as st
@@ -25,11 +26,17 @@ try:
 except ImportError:
     ollama = None
 
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
 DATASET_PATH = Path("sample_recipes.csv")
 DEFAULT_MODEL = "llama3.1"
+DEFAULT_CLOUD_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 DEFAULT_STAPLES = ["salt", "pepper", "olive oil"]
 NUM_GROUNDING_RECIPES = 3
 
@@ -113,12 +120,87 @@ Suggest ONE recipe using as many available ingredients as possible. Respond in t
 """
 
 
-def generate_recipe(prompt: str, model: str) -> str:
-    """Send the prompt to Ollama and return the model's response text."""
-    if ollama is None:
-        raise RuntimeError("The 'ollama' package isn't installed. Run: pip install ollama")
-    response = ollama.chat(model=model, messages=[{"role": "user", "content": prompt}])
-    return response['message']['content']
+def _get_secret(name: str) -> str | None:
+    """Read a secret from Streamlit secrets first, then environment variables."""
+    try:
+        value = st.secrets.get(name)
+        if value:
+            return str(value)
+    except Exception:
+        pass
+    return os.getenv(name)
+
+
+def generate_recipe(prompt: str, model: str) -> tuple[str, str]:
+    """
+    Generate a recipe using local Ollama when available.
+
+    If Ollama is unavailable, automatically fall back to OpenAI.
+    This makes the same app usable both locally and on Streamlit Cloud.
+    """
+    provider = os.getenv("LLM_PROVIDER", "auto").strip().lower()
+
+    # Explicit cloud mode skips the local Ollama attempt.
+    if provider in {"cloud", "openai"}:
+        return generate_with_openai(prompt), "OpenAI cloud"
+
+    # Explicit local mode requires Ollama.
+    if provider in {"ollama", "local"}:
+        if ollama is None:
+            raise RuntimeError(
+                "The 'ollama' Python package isn't installed. "
+                "Run: pip install ollama"
+            )
+        response = ollama.chat(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response["message"]["content"], "Local Ollama"
+
+    # AUTO mode: try local Ollama first, then cloud.
+    ollama_error = None
+    if ollama is not None:
+        try:
+            response = ollama.chat(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response["message"]["content"], "Local Ollama"
+        except Exception as exc:
+            ollama_error = exc
+
+    try:
+        return generate_with_openai(prompt), "OpenAI cloud"
+    except Exception as cloud_error:
+        if ollama_error is not None:
+            raise RuntimeError(
+                "Local Ollama was unavailable and cloud fallback also failed. "
+                f"Ollama: {ollama_error}. Cloud: {cloud_error}"
+            ) from cloud_error
+        raise
+
+
+def generate_with_openai(prompt: str) -> str:
+    """Generate a recipe through the OpenAI Responses API."""
+    if OpenAI is None:
+        raise RuntimeError(
+            "The 'openai' package isn't installed. Add 'openai' to requirements.txt."
+        )
+
+    api_key = _get_secret("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY is not configured. Add it to Streamlit Secrets "
+            "or set it as an environment variable."
+        )
+
+    cloud_model = _get_secret("OPENAI_MODEL") or DEFAULT_CLOUD_MODEL
+    client = OpenAI(api_key=api_key)
+    response = client.responses.create(
+        model=cloud_model,
+        input=prompt,
+    )
+    return response.output_text
 
 
 # --------------------------------------------------------------------------- #
@@ -164,10 +246,12 @@ def main() -> None:
 
         try:
             with st.spinner("PantryChef is thinking..."):
-                recipe = generate_recipe(prompt, DEFAULT_MODEL)
+                recipe, provider_used = generate_recipe(prompt, DEFAULT_MODEL)
         except Exception as exc:  # noqa: BLE001 - surface any generation error to the user
             st.error(f"Failed to generate a recipe: {exc}")
             return
+
+        st.caption(f"Generated with: {provider_used}")
 
         if grounding_recipes:
             st.caption("Inspired by: " + ", ".join(name for name, _ in grounding_recipes))
