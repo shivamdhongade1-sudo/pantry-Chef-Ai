@@ -34,7 +34,7 @@ except ImportError:
 # --------------------------------------------------------------------------- #
 DATASET_PATH = Path("sample_recipes.csv")
 # See https://console.groq.com/docs/models for the current list of models.
-DEFAULT_MODEL = "llama3.1"
+DEFAULT_MODEL = "llama3.1:latest"
 DEFAULT_STAPLES = ["salt", "pepper", "olive oil"]
 NUM_GROUNDING_RECIPES = 3
 
